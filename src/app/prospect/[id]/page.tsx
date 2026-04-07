@@ -365,7 +365,7 @@ export default function ProspectPage() {
         : "";
 
     return (
-        <div className="h-screen bg-[#F8FAFC] flex flex-col font-sans overflow-hidden">
+        <div className="h-full flex flex-col bg-[#F8FAFC] font-sans">
             {/* Top Navigation Bar */}
             <div className="h-16 bg-white border-b border-slate-100 px-8 flex items-center justify-between shrink-0 z-50">
                 <div className="flex items-center gap-6">
@@ -424,9 +424,9 @@ export default function ProspectPage() {
                 <div className="fixed inset-0 z-40" onClick={() => setShowReanalyzeConfirm(false)} />
             )}
 
-            <div className="flex-1 flex overflow-hidden">
+            <div className="flex-1 flex min-h-0 overflow-hidden">
                 {/* MAIN CONTENT AREA (Scrollable) */}
-                <div className="flex-1 overflow-y-auto custom-scrollbar bg-white lg:border-r border-slate-100 h-full">
+                <div className="flex-1 overflow-y-auto bg-white lg:border-r border-slate-100">
 
                     {/* Compact Header Section */}
                     <div className="px-6 pt-6">
@@ -866,7 +866,7 @@ export default function ProspectPage() {
                         </div>
                     </div>
 
-                    <div className="flex-1 overflow-y-auto custom-scrollbar p-3 space-y-2.5">
+                    <div className="flex-1 min-h-0 overflow-y-auto p-3 space-y-2.5">
                         {company.pocs?.map((poc) => {
                             const linkedInAction = getLinkedInAction(poc, company.name);
 
