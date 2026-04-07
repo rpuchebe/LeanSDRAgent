@@ -365,7 +365,7 @@ export default function ProspectPage() {
         : "";
 
     return (
-        <div className="min-h-screen bg-[#F8FAFC] flex flex-col font-sans">
+        <div className="h-full bg-[#F8FAFC] flex flex-col font-sans overflow-hidden">
             {/* Top Navigation Bar */}
             <div className="h-16 bg-white border-b border-slate-100 px-8 flex items-center justify-between sticky top-0 z-50">
                 <div className="flex items-center gap-6">
@@ -424,7 +424,7 @@ export default function ProspectPage() {
                 <div className="fixed inset-0 z-40" onClick={() => setShowReanalyzeConfirm(false)} />
             )}
 
-            <div className="flex-1 max-w-[1600px] mx-auto w-full grid grid-cols-12 gap-0 overflow-hidden h-[calc(100vh-64px)]">
+            <div className="flex-1 max-w-[1600px] mx-auto w-full grid grid-cols-12 gap-0 overflow-hidden h-full">
 
                 {/* MAIN CONTENT AREA (Scrollable) */}
                 <div className="col-span-12 lg:col-span-8 overflow-y-auto custom-scrollbar bg-white lg:border-r border-slate-100">
