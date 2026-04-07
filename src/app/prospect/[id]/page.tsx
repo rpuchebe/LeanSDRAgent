@@ -365,9 +365,9 @@ export default function ProspectPage() {
         : "";
 
     return (
-        <div className="h-full bg-[#F8FAFC] flex flex-col font-sans overflow-hidden">
+        <div className="h-screen bg-[#F8FAFC] flex flex-col font-sans overflow-hidden">
             {/* Top Navigation Bar */}
-            <div className="h-16 bg-white border-b border-slate-100 px-8 flex items-center justify-between sticky top-0 z-50">
+            <div className="h-16 bg-white border-b border-slate-100 px-8 flex items-center justify-between shrink-0 z-50">
                 <div className="flex items-center gap-6">
                     <Button variant="ghost" size="sm" onClick={() => router.back()} className="text-slate-400 hover:text-slate-900 rounded-xl px-2">
                         <ArrowLeft className="size-4 mr-2" />
@@ -424,10 +424,9 @@ export default function ProspectPage() {
                 <div className="fixed inset-0 z-40" onClick={() => setShowReanalyzeConfirm(false)} />
             )}
 
-            <div className="flex-1 max-w-[1600px] mx-auto w-full grid grid-cols-12 gap-0 overflow-hidden h-full">
-
+            <div className="flex-1 flex overflow-hidden">
                 {/* MAIN CONTENT AREA (Scrollable) */}
-                <div className="col-span-12 lg:col-span-8 overflow-y-auto custom-scrollbar bg-white lg:border-r border-slate-100">
+                <div className="flex-1 overflow-y-auto custom-scrollbar bg-white lg:border-r border-slate-100 h-full">
 
                     {/* Compact Header Section */}
                     <div className="px-6 pt-6">
@@ -858,8 +857,8 @@ export default function ProspectPage() {
                     <div className="h-40" />
                 </div>
 
-                {/* RIGHT SIDEBAR: POCs & CRM */}
-                <div className="col-span-12 lg:col-span-4 flex flex-col h-full bg-slate-50 border-l border-slate-200">
+                {/* RIGHT SIDEBAR: POCs & CRM - Fixed Width Desktop, Full Width Mobile if needed */}
+                <div className="hidden lg:flex w-[400px] flex-col h-full bg-slate-50 border-l border-slate-200">
                     <div className="p-4 border-b border-slate-200 bg-white shrink-0">
                         <div className="flex items-center justify-between">
                             <h3 className="font-bold text-slate-900 uppercase tracking-widest text-[10px]">Decision Makers</h3>
