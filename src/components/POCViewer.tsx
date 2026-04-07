@@ -17,7 +17,9 @@ interface POC {
     name: string;
     title: string;
     linkedinUrl: string;
-    suggestedEmail?: string;
+    subject?: string;
+    message?: string;
+    followUp?: string;
 }
 
 export default function POCViewer({ company, onClose }: POCViewerProps) {
@@ -45,6 +47,7 @@ export default function POCViewer({ company, onClose }: POCViewerProps) {
                     industry: company.industry,
                     pocName: newName,
                     pocTitle: newTitle,
+                    channel: "email",
                 }),
             });
 
@@ -56,7 +59,9 @@ export default function POCViewer({ company, onClose }: POCViewerProps) {
                 name: newName,
                 title: newTitle,
                 linkedinUrl: newLinkedin,
-                suggestedEmail: data.email
+                subject: data.subject,
+                message: data.message,
+                followUp: data.followUp,
             };
 
             setPocs([...pocs, newPoc]);
@@ -104,7 +109,7 @@ export default function POCViewer({ company, onClose }: POCViewerProps) {
                 </div>
 
                 <div className="p-8 space-y-8 bg-slate-50/50">
-                    <section className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-6 shadow-sm">
+                    <section className="bg-white border border-slate-200 rounded-3xl p-6 shadow-sm">
                         <h3 className="font-bold text-sm text-slate-500 uppercase tracking-[0.2em] mb-6 flex items-center gap-2">
                             <Plus className="w-4 h-4 text-blue-500" /> Add New POC Record
                         </h3>
@@ -152,30 +157,30 @@ export default function POCViewer({ company, onClose }: POCViewerProps) {
                     </section>
 
                     <div className="space-y-6">
-                        <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-800 pb-2">
-                            <h3 className="font-black text-slate-800 dark:text-white uppercase tracking-wider text-sm">Identified Stakeholders</h3>
+                        <div className="flex items-center justify-between border-b border-slate-200 pb-2">
+                            <h3 className="font-black text-slate-800 uppercase tracking-wider text-sm">Identified Stakeholders</h3>
                             <span className="text-xs font-bold text-blue-600 bg-blue-50 px-2 py-0.5 rounded-full">{pocs.length} Found</span>
                         </div>
 
                         {pocs.length === 0 ? (
-                            <div className="text-center py-16 bg-white dark:bg-slate-900 border border-dashed border-slate-200 dark:border-slate-800 rounded-3xl flex flex-col items-center animate-in fade-in zoom-in duration-300">
-                                <div className="h-20 w-20 bg-slate-50 dark:bg-slate-800 rounded-full flex items-center justify-center mb-4">
-                                    <User className="w-10 h-10 text-slate-300 dark:text-slate-600 shadow-inner" />
+                            <div className="text-center py-16 bg-white border border-dashed border-slate-200 rounded-3xl flex flex-col items-center animate-in fade-in zoom-in duration-300">
+                                <div className="h-20 w-20 bg-slate-50 rounded-full flex items-center justify-center mb-4">
+                                    <User className="w-10 h-10 text-slate-300 shadow-inner" />
                                 </div>
-                                <p className="text-lg font-bold text-slate-900 dark:text-white">No POCs added for this account</p>
+                                <p className="text-lg font-bold text-slate-900">No POCs added for this account</p>
                                 <p className="text-sm text-slate-500 mt-2 max-w-xs mx-auto">Use the Sales Navigator search to find relevant people and add them using the form above.</p>
                             </div>
                         ) : (
                             <div className="grid grid-cols-1 gap-6">
                                 {pocs.map((poc) => (
-                                    <div key={poc.id} className="group border border-slate-200 dark:border-slate-800 rounded-3xl bg-white dark:bg-slate-950 overflow-hidden shadow-sm hover:shadow-xl hover:border-blue-200 transition-all duration-300">
-                                        <div className="bg-slate-50/50 dark:bg-slate-900 px-6 py-5 flex justify-between items-center group-hover:bg-blue-50/50 transition-colors">
+                                    <div key={poc.id} className="group border border-slate-200 rounded-3xl bg-white overflow-hidden shadow-sm hover:shadow-xl hover:border-blue-200 transition-all duration-300">
+                                        <div className="bg-slate-50/50 px-6 py-5 flex justify-between items-center group-hover:bg-blue-50/50 transition-colors">
                                             <div className="flex items-center gap-4">
                                                 <div className="h-12 w-12 bg-blue-100 rounded-full flex items-center justify-center text-[#00A3FF] font-black text-xl shadow-sm">
                                                     {poc.name.charAt(0)}
                                                 </div>
                                                 <div>
-                                                    <h4 className="font-black text-lg text-slate-900 dark:text-slate-100 leading-tight">{poc.name}</h4>
+                                                    <h4 className="font-black text-lg text-slate-900 leading-tight">{poc.name}</h4>
                                                     <p className="text-slate-500 text-sm font-medium">{poc.title}</p>
                                                 </div>
                                             </div>
@@ -190,23 +195,30 @@ export default function POCViewer({ company, onClose }: POCViewerProps) {
                                                 </Button>
                                             )}
                                         </div>
-                                        {poc.suggestedEmail && (
-                                            <div className="p-6 relative">
+                                        {poc.subject && poc.message && (
+                                            <div className="p-6 relative space-y-4">
                                                 <div className="flex items-center justify-between mb-3">
                                                     <p className="font-bold text-xs text-slate-400 uppercase tracking-widest">Personalized Outreach Draft</p>
                                                     <Button
                                                         variant="ghost"
                                                         size="sm"
-                                                        onClick={() => copyToClipboard(poc.suggestedEmail!, poc.id)}
+                                                        onClick={() => copyToClipboard(`Subject: ${poc.subject}\n\n${poc.message}`, poc.id)}
                                                         className="h-8 text-blue-600 hover:bg-blue-50 group-hover:opacity-100 transition-all font-bold"
                                                     >
                                                         {copiedId === poc.id ? <Check className="w-4 h-4 mr-2" /> : <Copy className="w-4 h-4 mr-2" />}
                                                         {copiedId === poc.id ? "Copied!" : "Copy Email"}
                                                     </Button>
                                                 </div>
-                                                <div className="bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 text-sm text-slate-800 dark:text-slate-200 whitespace-pre-wrap font-sans leading-relaxed shadow-inner">
-                                                    {poc.suggestedEmail}
+                                                <div className="bg-slate-50 border border-slate-200 rounded-2xl p-5 text-sm text-slate-800 whitespace-pre-wrap font-sans leading-relaxed shadow-inner">
+                                                    <p className="font-bold text-slate-900 mb-3">Subject: {poc.subject}</p>
+                                                    <div>{poc.message}</div>
                                                 </div>
+                                                {poc.followUp && (
+                                                    <div className="bg-amber-50 border border-amber-200 rounded-2xl p-5 text-sm text-slate-800 whitespace-pre-wrap font-sans leading-relaxed">
+                                                        <p className="font-bold text-xs text-amber-600 uppercase tracking-widest mb-2">Follow-up — Send 3-5 days later</p>
+                                                        <div>{poc.followUp}</div>
+                                                    </div>
+                                                )}
                                             </div>
                                         )}
                                     </div>
@@ -216,7 +228,7 @@ export default function POCViewer({ company, onClose }: POCViewerProps) {
                     </div>
                 </div>
 
-                <div className="p-6 border-t bg-white dark:bg-slate-900 flex justify-end">
+                <div className="p-6 border-t bg-white flex justify-end">
                     <Button variant="outline" onClick={onClose} className="rounded-xl px-8 font-bold text-slate-500">Close Portal</Button>
                 </div>
             </DialogContent>

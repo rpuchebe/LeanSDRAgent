@@ -12,7 +12,7 @@ export const metadata: Metadata = {
   description: "Identify and verify high-value logistics targets.",
 };
 
-import { SidebarProvider } from "@/components/ui/sidebar";
+import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/AppSidebar";
 
 export default function RootLayout({
@@ -27,7 +27,8 @@ export default function RootLayout({
       >
         <SidebarProvider>
           <AppSidebar />
-          <main className="flex-1 overflow-hidden flex flex-col h-screen">
+          <main className="flex-1 overflow-hidden flex flex-col h-screen relative">
+            <SidebarTrigger className="absolute top-4 left-3 z-40 size-8 rounded-lg border border-slate-200 bg-white/80 backdrop-blur-sm shadow-sm hover:bg-slate-50 text-slate-500 hover:text-slate-900 transition-all" />
             {children}
           </main>
         </SidebarProvider>

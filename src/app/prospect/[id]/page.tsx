@@ -32,7 +32,11 @@ import {
     Clock,
     Navigation,
     RefreshCw,
-    Loader2
+    Loader2,
+    AlertTriangle,
+    Lightbulb,
+    Send,
+    FolderOpen
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -50,6 +54,20 @@ interface POCComment {
     created_at: string;
 }
 
+// Helper: determine LinkedIn link type and generate appropriate URL
+function getLinkedInAction(poc: { name: string; linkedinUrl: string }, companyName: string) {
+    const url = poc.linkedinUrl;
+    if (url && url.includes("/sales/search/")) {
+        return { type: "search" as const, url, label: "Search on LinkedIn" };
+    }
+    if (url && url.includes("/in/")) {
+        return { type: "profile" as const, url, label: "View Profile" };
+    }
+    // Fallback: manual search
+    const fallbackUrl = `https://www.linkedin.com/search/results/people/?keywords=${encodeURIComponent(poc.name + " " + companyName)}`;
+    return { type: "manual" as const, url: fallbackUrl, label: "Search Manually" };
+}
+
 export default function ProspectPage() {
     const params = useParams();
     const router = useRouter();
@@ -59,9 +77,18 @@ export default function ProspectPage() {
     const [activeCommentPoc, setActiveCommentPoc] = useState<string | null>(null);
     const [isEnriching, setIsEnriching] = useState(false);
     const [copiedId, setCopiedId] = useState<string | null>(null);
+    const [showReanalyzeConfirm, setShowReanalyzeConfirm] = useState(false);
+    const [loadingTimeout, setLoadingTimeout] = useState(false);
+    const [generatedOutreach, setGeneratedOutreach] = useState<Record<string, Record<string, any>>>({});
+    const [generatingOutreach, setGeneratingOutreach] = useState<Record<string, boolean>>({});
+    const [outreachCopied, setOutreachCopied] = useState<string | null>(null);
 
     useEffect(() => {
         fetchCompanyData();
+        const timer = setTimeout(() => {
+            setLoadingTimeout(true);
+        }, 10000);
+        return () => clearTimeout(timer);
     }, [params.id]);
 
     const fetchCompanyData = async () => {
@@ -101,10 +128,15 @@ export default function ProspectPage() {
                 rolesMatch: dbCompany.roles_match,
                 relevantCustomers: dbCompany.relevant_customers,
                 enrichStatus: "verified",
+                lsgFitScore: dbCompany.lsg_fit_score,
+                lsgFitReasoning: dbCompany.lsg_fit_reasoning,
+                outreachAngle: dbCompany.outreach_angle,
                 pocs: dbCompany.company_pocs?.map((p: any) => ({
                     id: p.id,
                     name: p.name,
                     title: p.title,
+                    department: p.department,
+                    seniorityLevel: p.seniority_level,
                     linkedinUrl: p.linkedin_url,
                     isAccepted: p.is_accepted,
                     profilePicUrl: p.profile_pic_url
@@ -173,16 +205,48 @@ export default function ProspectPage() {
         });
     };
 
-    const handlePocLinkedInClick = async (pocId: string, current: boolean) => {
-        // Only set to true if not already accepted/opened
-        if (!current) {
-            await toggleAccepted(pocId, false);
+    const handleGenerateOutreach = async (pocId: string, pocName: string, pocTitle: string, pocDepartment: string, channel: "email" | "linkedin" | "call_script") => {
+        if (!company) return;
+        const key = `${pocId}_${channel}`;
+        setGeneratingOutreach(prev => ({ ...prev, [key]: true }));
+        try {
+            const res = await fetch("/api/emails/generate", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    companyName: company.name,
+                    industry: company.industry,
+                    pocName: pocName,
+                    pocTitle: pocTitle,
+                    pocDepartment: pocDepartment,
+                    outreachAngle: company.outreachAngle,
+                    relevantCustomers: company.relevantCustomers?.map((c: any) => typeof c === 'string' ? c : c.company),
+                    channel
+                }),
+            });
+            if (!res.ok) throw new Error("Failed to generate outreach");
+            const data = await res.json();
+            setGeneratedOutreach(prev => ({
+                ...prev,
+                [pocId]: { ...(prev[pocId] || {}), [channel]: data }
+            }));
+        } catch (error) {
+            console.error("Failed to generate outreach", error);
+        } finally {
+            setGeneratingOutreach(prev => ({ ...prev, [key]: false }));
         }
+    };
+
+    const copyToClipboard = (text: string, id: string) => {
+        navigator.clipboard.writeText(text);
+        setOutreachCopied(id);
+        setTimeout(() => setOutreachCopied(null), 2000);
     };
 
     const handleUpdateData = async () => {
         if (!company) return;
         setIsEnriching(true);
+        setShowReanalyzeConfirm(false);
         try {
             const res = await fetch("/api/companies/enrich", {
                 method: "POST",
@@ -193,7 +257,6 @@ export default function ProspectPage() {
             if (!res.ok) throw new Error("Failed to enrich");
             const data = await res.json();
 
-            // Construct new data
             // Construct new data with exact DB column names
             const enrichedResult = {
                 country: data.country || company.country,
@@ -228,7 +291,9 @@ export default function ProspectPage() {
                     company_id: savedCo.id,
                     name: p.name,
                     title: p.title,
-                    linkedin_url: p.linkedin_url
+                    department: p.department,
+                    seniority_level: p.seniorityLevel,
+                    linkedin_url: p.linkedin_url || p.searchUrl
                 }));
                 const { data: newPocs } = await supabase.from('company_pocs').insert(pocsToSave).select();
 
@@ -237,6 +302,8 @@ export default function ProspectPage() {
                         id: p.id,
                         name: p.name,
                         title: p.title,
+                        department: p.department,
+                        seniorityLevel: p.seniority_level,
                         linkedinUrl: p.linkedin_url,
                         isAccepted: p.is_accepted,
                         profilePicUrl: p.profile_pic_url
@@ -270,11 +337,32 @@ export default function ProspectPage() {
     if (!company) return (
         <div className="flex items-center justify-center h-screen bg-slate-50">
             <div className="flex flex-col items-center gap-4">
-                <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500"></div>
-                <p className="text-slate-500 font-bold uppercase tracking-widest text-xs">Loading Intelligence...</p>
+                {loadingTimeout ? (
+                    <>
+                        <AlertTriangle className="size-12 text-amber-400" />
+                        <p className="text-slate-700 font-bold text-sm">Company not found.</p>
+                        <p className="text-slate-400 text-xs">It may not have been enriched yet.</p>
+                        <Button onClick={() => router.back()} className="mt-2 bg-blue-500 hover:bg-blue-600 text-white rounded-xl font-bold uppercase text-[10px] tracking-widest">
+                            <ArrowLeft className="size-3 mr-2" />
+                            Go Back
+                        </Button>
+                    </>
+                ) : (
+                    <>
+                        <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500"></div>
+                        <p className="text-slate-500 font-bold uppercase tracking-widest text-xs">Loading Intelligence...</p>
+                    </>
+                )}
             </div>
         </div>
     );
+
+    const fitScore = company.lsgFitScore;
+    const fitScoreColor = fitScore != null
+        ? fitScore >= 8 ? "text-emerald-600 bg-emerald-50 border-emerald-200"
+        : fitScore >= 5 ? "text-amber-600 bg-amber-50 border-amber-200"
+        : "text-red-600 bg-red-50 border-red-200"
+        : "";
 
     return (
         <div className="min-h-screen bg-[#F8FAFC] flex flex-col font-sans">
@@ -291,23 +379,50 @@ export default function ProspectPage() {
                             <Building2 className="size-4 text-white" />
                         </div>
                         <span className="font-bold text-slate-900 uppercase tracking-tight text-sm">{company.name}</span>
+                        {fitScore != null && (
+                            <div className={`flex items-center gap-1 px-2 py-0.5 rounded-lg border text-xs font-bold ${fitScoreColor}`}>
+                                <Target className="size-3" />
+                                {fitScore}/10
+                            </div>
+                        )}
                     </div>
                 </div>
 
                 <div className="flex items-center gap-3">
-                    <Button variant="outline" size="sm" className="rounded-xl border-slate-200 text-slate-500 font-bold text-[10px] uppercase tracking-widest">
-                        Export Profile
-                    </Button>
-                    <Button
-                        onClick={handleUpdateData}
-                        disabled={isEnriching}
-                        className="h-9 px-4 bg-[#00A3FF] hover:bg-blue-600 text-white rounded-xl font-bold uppercase text-[10px] tracking-widest shadow-lg shadow-blue-500/20 transition-all gap-2"
-                    >
-                        {isEnriching ? <Loader2 className="size-3.5 animate-spin" /> : <RefreshCw className="size-3.5" />}
-                        Update Data
-                    </Button>
+                    <div className="relative">
+                        <Button
+                            onClick={() => setShowReanalyzeConfirm(true)}
+                            disabled={isEnriching}
+                            className="h-9 px-4 bg-[#00A3FF] hover:bg-blue-600 text-white rounded-xl font-bold uppercase text-[10px] tracking-widest shadow-lg shadow-blue-500/20 transition-all gap-2"
+                        >
+                            {isEnriching ? <Loader2 className="size-3.5 animate-spin" /> : <RefreshCw className="size-3.5" />}
+                            Re-analyze
+                        </Button>
+
+                        {/* Confirmation Dialog */}
+                        {showReanalyzeConfirm && (
+                            <div className="absolute right-0 top-12 w-80 bg-white rounded-xl shadow-2xl border border-slate-200 p-4 z-50 animate-in fade-in slide-in-from-top-2 duration-200">
+                                <p className="text-sm font-medium text-slate-700 mb-3">
+                                    This will re-enrich the company data and refresh all POCs. Continue?
+                                </p>
+                                <div className="flex items-center gap-2 justify-end">
+                                    <Button variant="outline" size="sm" onClick={() => setShowReanalyzeConfirm(false)} className="rounded-lg text-xs">
+                                        Cancel
+                                    </Button>
+                                    <Button size="sm" onClick={handleUpdateData} className="rounded-lg text-xs bg-blue-500 hover:bg-blue-600 text-white">
+                                        Yes, Re-analyze
+                                    </Button>
+                                </div>
+                            </div>
+                        )}
+                    </div>
                 </div>
             </div>
+
+            {/* Click-away for confirmation dialog */}
+            {showReanalyzeConfirm && (
+                <div className="fixed inset-0 z-40" onClick={() => setShowReanalyzeConfirm(false)} />
+            )}
 
             <div className="flex-1 max-w-[1600px] mx-auto w-full grid grid-cols-12 gap-0 overflow-hidden h-[calc(100vh-64px)]">
 
@@ -341,7 +456,7 @@ export default function ProspectPage() {
                                     </div>
 
                                     <p className="text-slate-600 font-medium leading-relaxed max-w-4xl text-xs italic mb-4 line-clamp-2">
-                                        "{company.description}"
+                                        &ldquo;{company.description}&rdquo;
                                     </p>
 
                                     <div className="flex flex-wrap gap-1.5">
@@ -356,6 +471,40 @@ export default function ProspectPage() {
                         </div>
                     </div>
 
+                    {/* Outreach Strategy Card (if data available) */}
+                    {(fitScore != null || company.outreachAngle) && (
+                        <div className="px-6 mt-4">
+                            <div className="bg-gradient-to-br from-blue-50 to-indigo-50 rounded-2xl p-5 border border-blue-100">
+                                <div className="flex items-start gap-4">
+                                    {fitScore != null && (
+                                        <div className={`shrink-0 size-16 rounded-2xl border-2 flex flex-col items-center justify-center ${fitScoreColor}`}>
+                                            <span className="text-2xl font-black leading-none">{fitScore}</span>
+                                            <span className="text-[8px] font-bold uppercase tracking-widest opacity-70">/10</span>
+                                        </div>
+                                    )}
+                                    <div className="flex-1 min-w-0">
+                                        <div className="flex items-center gap-2 mb-1">
+                                            <Target className="size-4 text-blue-600" />
+                                            <h3 className="font-bold text-slate-900 text-sm">LSG Fit Score</h3>
+                                        </div>
+                                        {company.lsgFitReasoning && (
+                                            <p className="text-xs text-slate-600 leading-relaxed mb-3">{company.lsgFitReasoning}</p>
+                                        )}
+                                        {company.outreachAngle && (
+                                            <div className="bg-white/70 rounded-xl p-3 border border-blue-100">
+                                                <div className="flex items-center gap-1.5 mb-1">
+                                                    <Lightbulb className="size-3.5 text-amber-500" />
+                                                    <span className="text-[10px] font-bold text-slate-900 uppercase tracking-widest">Recommended Approach</span>
+                                                </div>
+                                                <p className="text-xs text-slate-700 font-medium leading-relaxed">{company.outreachAngle}</p>
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
                     {/* Page Tabs */}
                     <div className="px-10 mt-10">
                         <Tabs defaultValue="overview" className="w-full">
@@ -363,6 +512,7 @@ export default function ProspectPage() {
                                 <TabsTrigger value="overview" className="data-[state=active]:bg-transparent data-[state=active]:border-b-2 data-[state=active]:border-blue-500 rounded-none border-b-2 border-transparent px-2 pb-4 pt-0 font-bold text-[11px] uppercase tracking-[0.15em] text-slate-400 data-[state=active]:text-blue-600 transition-all">Overview</TabsTrigger>
                                 <TabsTrigger value="jobs" className="data-[state=active]:bg-transparent data-[state=active]:border-b-2 data-[state=active]:border-blue-500 rounded-none border-b-2 border-transparent px-2 pb-4 pt-0 font-bold text-[11px] uppercase tracking-[0.15em] text-slate-400 data-[state=active]:text-blue-600 transition-all">Jobs & Talent</TabsTrigger>
                                 <TabsTrigger value="matches" className="data-[state=active]:bg-transparent data-[state=active]:border-b-2 data-[state=active]:border-blue-500 rounded-none border-b-2 border-transparent px-2 pb-4 pt-0 font-bold text-[11px] uppercase tracking-[0.15em] text-slate-400 data-[state=active]:text-blue-600 transition-all">Match Customers</TabsTrigger>
+                                <TabsTrigger value="outreach" className="data-[state=active]:bg-transparent data-[state=active]:border-b-2 data-[state=active]:border-blue-500 rounded-none border-b-2 border-transparent px-2 pb-4 pt-0 font-bold text-[11px] uppercase tracking-[0.15em] text-slate-400 data-[state=active]:text-blue-600 transition-all">Outreach</TabsTrigger>
                             </TabsList>
 
                             {/* OVERVIEW TAB */}
@@ -458,12 +608,7 @@ export default function ProspectPage() {
                                             </tr>
                                         </thead>
                                         <tbody className="divide-y divide-slate-100">
-                                            {(company.rolesMatch && company.rolesMatch.length > 0 ? company.rolesMatch : [
-                                                { role: "Dispatcher", fitLevel: "High", estSalary: "$45k - $65k" },
-                                                { role: "Logistics Coordinator", fitLevel: "High", estSalary: "$50k - $70k" },
-                                                { role: "Track & Trace", fitLevel: "Medium", estSalary: "$40k - $55k" },
-                                                { role: "Carrier Sales", fitLevel: "High", estSalary: "$60k - $90k" }
-                                            ]).map((item, idx) => {
+                                            {company.rolesMatch && company.rolesMatch.length > 0 ? company.rolesMatch.map((item, idx) => {
                                                 const matchLower = item.fitLevel.toLowerCase();
                                                 let matchColorClass = 'bg-slate-100 text-slate-500';
 
@@ -489,7 +634,13 @@ export default function ProspectPage() {
                                                         </td>
                                                     </tr>
                                                 )
-                                            })}
+                                            }) : (
+                                                <tr>
+                                                    <td colSpan={3} className="px-5 py-8 text-center text-xs text-slate-400 font-medium">
+                                                        No roles data available. Click Re-analyze to generate.
+                                                    </td>
+                                                </tr>
+                                            )}
                                         </tbody>
                                     </table>
                                 </div>
@@ -522,10 +673,7 @@ export default function ProspectPage() {
                                                 </tr>
                                             </thead>
                                             <tbody className="divide-y divide-slate-100">
-                                                {(company.relevantCustomers && company.relevantCustomers.length > 0 ? company.relevantCustomers : [
-                                                    { company: "JB Hunt", reasoning: "Large logistics portfolio match." },
-                                                    { company: "CH Robinson", reasoning: "Market share similarities." }
-                                                ]).map((customer: any, idx) => (
+                                                {company.relevantCustomers && company.relevantCustomers.length > 0 ? company.relevantCustomers.map((customer: any, idx) => (
                                                     <tr key={idx} className="hover:bg-slate-50/50 transition-colors">
                                                         <td className="px-5 py-4 align-top font-bold text-slate-900 text-xs">
                                                             <div className="flex items-center gap-2 select-text">
@@ -537,10 +685,170 @@ export default function ProspectPage() {
                                                             {typeof customer === 'string' ? 'Relevant target reference.' : customer.reasoning}
                                                         </td>
                                                     </tr>
-                                                ))}
+                                                )) : (
+                                                    <tr>
+                                                        <td colSpan={2} className="px-5 py-8 text-center text-xs text-slate-400 font-medium">
+                                                            No customer match data available. Click Re-analyze to generate.
+                                                        </td>
+                                                    </tr>
+                                                )}
                                             </tbody>
                                         </table>
                                     </div>
+                                </div>
+                            </TabsContent>
+
+                            {/* OUTREACH TAB */}
+                            <TabsContent value="outreach" className="py-6 space-y-6 animate-in fade-in slide-in-from-bottom-2 duration-500">
+                                {/* Outreach Angle */}
+                                {company.outreachAngle ? (
+                                    <div className="bg-gradient-to-br from-amber-50 to-orange-50 rounded-2xl p-6 border border-amber-100">
+                                        <div className="flex items-center gap-2 mb-3">
+                                            <Lightbulb className="size-5 text-amber-500" />
+                                            <h3 className="font-bold text-slate-900 text-sm">Outreach Angle</h3>
+                                        </div>
+                                        <p className="text-sm text-slate-700 leading-relaxed">{company.outreachAngle}</p>
+                                    </div>
+                                ) : (
+                                    <div className="bg-slate-50 rounded-2xl p-6 border border-slate-200 text-center">
+                                        <Lightbulb className="size-6 text-slate-300 mx-auto mb-2" />
+                                        <p className="text-xs text-slate-400 font-medium">No outreach angle available yet. Click Re-analyze to generate one.</p>
+                                    </div>
+                                )}
+
+                                {/* LSG Fit Reasoning */}
+                                {company.lsgFitReasoning && (
+                                    <div className="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm">
+                                        <div className="flex items-center gap-2 mb-3">
+                                            <Target className="size-5 text-blue-500" />
+                                            <h3 className="font-bold text-slate-900 text-sm">Why This Company Fits LSG</h3>
+                                            {fitScore != null && (
+                                                <Badge className={`ml-auto font-bold text-xs ${fitScoreColor} border`}>{fitScore}/10</Badge>
+                                            )}
+                                        </div>
+                                        <p className="text-sm text-slate-600 leading-relaxed">{company.lsgFitReasoning}</p>
+                                    </div>
+                                )}
+
+                                {/* Multi-channel Suggestions */}
+                                <div className="space-y-3">
+                                    <h4 className="font-bold text-slate-900 uppercase tracking-widest text-[10px] px-1">Suggested Channels</h4>
+                                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                                        <Card className="rounded-xl border-slate-200 shadow-sm">
+                                            <CardContent className="p-4 flex flex-col items-center text-center gap-2">
+                                                <div className="size-10 rounded-xl bg-blue-50 flex items-center justify-center">
+                                                    <Mail className="size-5 text-blue-500" />
+                                                </div>
+                                                <p className="text-[10px] font-bold text-slate-900 uppercase tracking-widest">Email</p>
+                                                <p className="text-[10px] text-slate-500">Personalized cold email using outreach angle</p>
+                                            </CardContent>
+                                        </Card>
+                                        <Card className="rounded-xl border-slate-200 shadow-sm">
+                                            <CardContent className="p-4 flex flex-col items-center text-center gap-2">
+                                                <div className="size-10 rounded-xl bg-blue-50 flex items-center justify-center">
+                                                    <Linkedin className="size-5 text-blue-500" />
+                                                </div>
+                                                <p className="text-[10px] font-bold text-slate-900 uppercase tracking-widest">LinkedIn</p>
+                                                <p className="text-[10px] text-slate-500">Connection request + InMail sequence</p>
+                                            </CardContent>
+                                        </Card>
+                                        <Card className="rounded-xl border-slate-200 shadow-sm">
+                                            <CardContent className="p-4 flex flex-col items-center text-center gap-2">
+                                                <div className="size-10 rounded-xl bg-emerald-50 flex items-center justify-center">
+                                                    <Send className="size-5 text-emerald-500" />
+                                                </div>
+                                                <p className="text-[10px] font-bold text-slate-900 uppercase tracking-widest">Direct</p>
+                                                <p className="text-[10px] text-slate-500">Phone call to accepted POCs</p>
+                                            </CardContent>
+                                        </Card>
+                                    </div>
+                                </div>
+
+                                {/* Accepted POCs - Generate Outreach */}
+                                <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm">
+                                    <h4 className="font-bold text-slate-900 uppercase tracking-widest text-[10px] mb-3">Generate Outreach for Accepted Contacts</h4>
+                                    {company.pocs?.filter(p => p.isAccepted).length ? (
+                                        <div className="space-y-4">
+                                            {company.pocs?.filter(p => p.isAccepted).map(poc => (
+                                                <div key={poc.id} className="border border-slate-200 rounded-xl overflow-hidden">
+                                                    <div className="flex items-center justify-between p-3 bg-emerald-50/50 border-b border-emerald-100">
+                                                        <div>
+                                                            <p className="text-xs font-bold text-slate-900">{poc.name}</p>
+                                                            <p className="text-[10px] text-slate-500">{poc.title}{poc.department ? ` - ${poc.department}` : ''}</p>
+                                                        </div>
+                                                        <div className="flex items-center gap-1.5">
+                                                            {(["email", "linkedin", "call_script"] as const).map(channel => {
+                                                                const key = `${poc.id}_${channel}`;
+                                                                const isGenerating = generatingOutreach[key];
+                                                                const hasGenerated = generatedOutreach[poc.id]?.[channel];
+                                                                const labels = { email: "Email", linkedin: "LinkedIn", call_script: "Call Script" };
+                                                                const icons = { email: <Mail className="size-3" />, linkedin: <Linkedin className="size-3" />, call_script: <Send className="size-3" /> };
+                                                                return (
+                                                                    <Button
+                                                                        key={channel}
+                                                                        size="sm"
+                                                                        variant={hasGenerated ? "outline" : "default"}
+                                                                        disabled={isGenerating}
+                                                                        onClick={() => handleGenerateOutreach(poc.id, poc.name, poc.title || '', poc.department || '', channel)}
+                                                                        className={`h-7 px-2.5 rounded-lg text-[9px] font-bold uppercase tracking-wider gap-1 ${hasGenerated ? 'border-emerald-200 text-emerald-600 bg-emerald-50' : 'bg-blue-500 hover:bg-blue-600 text-white'}`}
+                                                                    >
+                                                                        {isGenerating ? <Loader2 className="size-3 animate-spin" /> : icons[channel]}
+                                                                        {hasGenerated ? <Check className="size-3" /> : labels[channel]}
+                                                                    </Button>
+                                                                );
+                                                            })}
+                                                        </div>
+                                                    </div>
+
+                                                    {/* Rendered outreach results */}
+                                                    {generatedOutreach[poc.id] && Object.entries(generatedOutreach[poc.id]).map(([channel, data]) => (
+                                                        <div key={channel} className="p-4 border-b border-slate-100 last:border-b-0">
+                                                            <div className="flex items-center justify-between mb-2">
+                                                                <Badge className="bg-blue-50 text-blue-600 border-none font-bold text-[9px] uppercase tracking-widest">
+                                                                    {channel === 'call_script' ? 'Call Script' : channel}
+                                                                </Badge>
+                                                            </div>
+                                                            {data.subject && (
+                                                                <div className="mb-2">
+                                                                    <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest mb-0.5">Subject</p>
+                                                                    <div className="flex items-center justify-between bg-slate-50 rounded-lg px-3 py-2">
+                                                                        <p className="text-xs font-semibold text-slate-800">{data.subject}</p>
+                                                                        <button onClick={() => copyToClipboard(data.subject, `${poc.id}_${channel}_subject`)} className="text-slate-400 hover:text-blue-500 ml-2 shrink-0">
+                                                                            {outreachCopied === `${poc.id}_${channel}_subject` ? <Check className="size-3 text-emerald-500" /> : <Copy className="size-3" />}
+                                                                        </button>
+                                                                    </div>
+                                                                </div>
+                                                            )}
+                                                            {(data.body || data.message) && (
+                                                                <div className="mb-2">
+                                                                    <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest mb-0.5">Message</p>
+                                                                    <div className="relative bg-slate-50 rounded-lg px-3 py-2">
+                                                                        <p className="text-xs text-slate-700 leading-relaxed whitespace-pre-wrap pr-6">{data.body || data.message}</p>
+                                                                        <button onClick={() => copyToClipboard(data.body || data.message, `${poc.id}_${channel}_body`)} className="absolute top-2 right-2 text-slate-400 hover:text-blue-500">
+                                                                            {outreachCopied === `${poc.id}_${channel}_body` ? <Check className="size-3 text-emerald-500" /> : <Copy className="size-3" />}
+                                                                        </button>
+                                                                    </div>
+                                                                </div>
+                                                            )}
+                                                            {data.followUp && (
+                                                                <div>
+                                                                    <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest mb-0.5">Follow-up</p>
+                                                                    <div className="relative bg-amber-50/50 rounded-lg px-3 py-2 border border-amber-100">
+                                                                        <p className="text-xs text-slate-700 leading-relaxed whitespace-pre-wrap pr-6">{data.followUp}</p>
+                                                                        <button onClick={() => copyToClipboard(data.followUp, `${poc.id}_${channel}_followup`)} className="absolute top-2 right-2 text-slate-400 hover:text-blue-500">
+                                                                            {outreachCopied === `${poc.id}_${channel}_followup` ? <Check className="size-3 text-emerald-500" /> : <Copy className="size-3" />}
+                                                                        </button>
+                                                                    </div>
+                                                                </div>
+                                                            )}
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            ))}
+                                        </div>
+                                    ) : (
+                                        <p className="text-xs text-slate-400 text-center py-4">No accepted POCs yet. Accept contacts in the sidebar to plan outreach.</p>
+                                    )}
                                 </div>
                             </TabsContent>
                         </Tabs>
@@ -559,90 +867,137 @@ export default function ProspectPage() {
                         </div>
                     </div>
 
-                    <div className="flex-1 overflow-y-auto custom-scrollbar p-3 space-y-2">
-                        {company.pocs?.map((poc) => (
-                            <div key={poc.id} className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm hover:border-blue-300 transition-all group">
-                                <div
-                                    className="p-3 flex items-center gap-3 cursor-pointer hover:bg-slate-50/50"
-                                    onClick={(e) => {
-                                        const url = poc.linkedinUrl || (poc as any).linkedin_url;
-                                        if (url) {
-                                            window.open(url, '_blank', 'noopener,noreferrer');
-                                            handlePocLinkedInClick(poc.id, !!poc.isAccepted);
-                                        } else {
-                                            // Toggle comment section if no linkedin is found, 
-                                            // or just toggle comment section if you want to keep that functionality
-                                            setActiveCommentPoc(activeCommentPoc === poc.id ? null : poc.id);
-                                        }
-                                    }}
-                                >
-                                    {/* Avatar */}
-                                    <div className="size-9 rounded-lg bg-indigo-50 border border-indigo-100 flex items-center justify-center shrink-0 overflow-hidden">
-                                        {poc.profilePicUrl ? (
-                                            <img src={poc.profilePicUrl} className="size-full object-cover" />
-                                        ) : (
-                                            <User className="size-4 text-indigo-400" />
+                    <div className="flex-1 overflow-y-auto custom-scrollbar p-3 space-y-2.5">
+                        {company.pocs?.map((poc) => {
+                            const linkedInAction = getLinkedInAction(poc, company.name);
+
+                            return (
+                                <div key={poc.id} className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm hover:border-blue-200 hover:shadow-md transition-all">
+                                    <div className="p-4">
+                                        {/* Top row: Avatar + Name + Accept toggle */}
+                                        <div className="flex items-start gap-3 mb-2.5">
+                                            <div className="size-10 rounded-xl bg-indigo-50 border border-indigo-100 flex items-center justify-center shrink-0 overflow-hidden">
+                                                {poc.profilePicUrl ? (
+                                                    <img src={poc.profilePicUrl} className="size-full object-cover" />
+                                                ) : (
+                                                    <User className="size-5 text-indigo-400" />
+                                                )}
+                                            </div>
+                                            <div className="flex-1 min-w-0">
+                                                <div className="flex items-center justify-between">
+                                                    <span className="font-bold text-slate-900 text-sm truncate pr-2">{poc.name}</span>
+                                                    <button
+                                                        onClick={() => toggleAccepted(poc.id, !!poc.isAccepted)}
+                                                        className={`size-6 rounded-lg border-2 flex items-center justify-center transition-all shrink-0 ${poc.isAccepted ? 'bg-emerald-500 border-emerald-500 shadow-sm shadow-emerald-500/20' : 'border-slate-200 bg-white hover:border-blue-400'}`}
+                                                        title={poc.isAccepted ? "Accepted - click to unaccept" : "Click to accept this contact"}
+                                                    >
+                                                        {poc.isAccepted && <Check className="size-3.5 text-white stroke-[3px]" />}
+                                                    </button>
+                                                </div>
+                                                <p className="text-[10px] font-bold text-slate-500 uppercase tracking-tight truncate mt-0.5">{poc.title}</p>
+                                                <Badge className="mt-1 bg-purple-50 text-purple-400 border-purple-100 border font-medium px-1.5 py-0 text-[8px] uppercase tracking-wider w-fit">AI-suggested</Badge>
+                                            </div>
+                                        </div>
+
+                                        {/* Department + Seniority badges */}
+                                        {(poc.department || poc.seniorityLevel) && (
+                                            <div className="flex items-center gap-1.5 mb-3">
+                                                {poc.department && (
+                                                    <Badge variant="outline" className="rounded-md border-slate-200 bg-slate-50 text-slate-500 font-semibold px-1.5 py-0 text-[9px] gap-1">
+                                                        <FolderOpen className="size-2.5" />
+                                                        {poc.department}
+                                                    </Badge>
+                                                )}
+                                                {poc.seniorityLevel && (
+                                                    <Badge variant="outline" className="rounded-md border-violet-200 bg-violet-50 text-violet-600 font-semibold px-1.5 py-0 text-[9px]">
+                                                        {poc.seniorityLevel}
+                                                    </Badge>
+                                                )}
+                                            </div>
+                                        )}
+
+                                        {/* LinkedIn action button */}
+                                        <div className="flex items-center gap-2">
+                                            <a
+                                                href={linkedInAction.url}
+                                                target="_blank"
+                                                rel="noopener noreferrer"
+                                                className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-[10px] font-bold uppercase tracking-widest transition-all ${
+                                                    linkedInAction.type === "search"
+                                                        ? "bg-blue-500 hover:bg-blue-600 text-white shadow-sm shadow-blue-500/20"
+                                                        : linkedInAction.type === "profile"
+                                                        ? "bg-blue-500 hover:bg-blue-600 text-white shadow-sm shadow-blue-500/20"
+                                                        : "bg-slate-100 hover:bg-slate-200 text-slate-600"
+                                                }`}
+                                            >
+                                                {linkedInAction.type === "search" ? (
+                                                    <Search className="size-3" />
+                                                ) : linkedInAction.type === "profile" ? (
+                                                    <ExternalLink className="size-3" />
+                                                ) : (
+                                                    <Search className="size-3" />
+                                                )}
+                                                {linkedInAction.label}
+                                            </a>
+
+                                            {/* Comment toggle */}
+                                            <button
+                                                onClick={() => setActiveCommentPoc(activeCommentPoc === poc.id ? null : poc.id)}
+                                                className={`size-8 rounded-lg border flex items-center justify-center transition-colors ${
+                                                    activeCommentPoc === poc.id
+                                                        ? "bg-blue-50 border-blue-200 text-blue-500"
+                                                        : "border-slate-200 text-slate-400 hover:text-slate-600 hover:border-slate-300"
+                                                }`}
+                                                title="Add note"
+                                            >
+                                                <MessageSquare className="size-3.5" />
+                                            </button>
+                                        </div>
+
+                                        {/* Unverified link warning */}
+                                        {linkedInAction.type === "profile" && (
+                                            <div className="flex items-center gap-1 mt-2 px-1">
+                                                <AlertTriangle className="size-3 text-amber-500" />
+                                                <span className="text-[9px] text-amber-600 font-medium">Unverified link - may not work</span>
+                                            </div>
                                         )}
                                     </div>
 
-                                    {/* Info */}
-                                    <div className="flex-1 min-w-0">
-                                        <div className="flex items-center justify-between">
-                                            <span className="font-bold text-slate-900 text-xs truncate pr-2 group-hover:text-blue-600 transition-colors">{poc.name}</span>
-                                            <div className="flex items-center gap-1.5 shrink-0" onClick={e => e.stopPropagation()}>
-                                                {(poc.linkedinUrl || (poc as any).linkedin_url) && (
-                                                    <a
-                                                        href={poc.linkedinUrl || (poc as any).linkedin_url}
-                                                        target="_blank"
-                                                        rel="noopener noreferrer"
-                                                        className="size-5 flex items-center justify-center rounded-md bg-blue-50 text-blue-600 hover:bg-blue-500 hover:text-white transition-colors"
-                                                        onClick={() => handlePocLinkedInClick(poc.id, !!poc.isAccepted)}
-                                                    >
-                                                        <Linkedin className="size-3" />
-                                                    </a>
+                                    {/* Comment Section (Collapsible) */}
+                                    {activeCommentPoc === poc.id && (
+                                        <div className="bg-slate-50 p-3 border-t border-slate-100 space-y-3 animate-in slide-in-from-top-2 duration-200">
+                                            <div className="flex gap-2">
+                                                <Input
+                                                    placeholder="Add a note..."
+                                                    value={newComment}
+                                                    onChange={(e) => setNewComment(e.target.value)}
+                                                    onKeyDown={(e) => { if (e.key === "Enter") handleAddComment(poc.id); }}
+                                                    className="h-8 rounded-lg text-xs bg-white border-slate-200"
+                                                />
+                                                <Button size="sm" onClick={() => handleAddComment(poc.id)} className="bg-blue-500 hover:bg-blue-600 text-white rounded-lg h-8 px-3">
+                                                    <Plus className="size-3" />
+                                                </Button>
+                                            </div>
+
+                                            <div className="space-y-2 max-h-40 overflow-y-auto">
+                                                {comments[poc.id]?.map((comm) => (
+                                                    <div key={comm.id} className="bg-white p-2.5 rounded-xl shadow-sm border border-slate-100">
+                                                        <div className="flex items-center justify-between mb-1">
+                                                            <span className="text-[9px] font-bold text-blue-600 uppercase">{comm.author_name}</span>
+                                                            <span className="text-[9px] text-slate-400 font-medium">{new Date(comm.created_at).toLocaleDateString()}</span>
+                                                        </div>
+                                                        <p className="text-[11px] font-medium text-slate-600">{comm.comment}</p>
+                                                    </div>
+                                                ))}
+                                                {(!comments[poc.id] || comments[poc.id].length === 0) && (
+                                                    <p className="text-[10px] text-slate-400 text-center py-2">No notes yet</p>
                                                 )}
-                                                <button
-                                                    onClick={(e) => { e.stopPropagation(); toggleAccepted(poc.id, !!poc.isAccepted); }}
-                                                    className={`size-5 rounded-md border flex items-center justify-center transition-colors ${poc.isAccepted ? 'bg-emerald-500 border-emerald-500' : 'border-slate-200 bg-white hover:border-blue-400'}`}
-                                                >
-                                                    {poc.isAccepted && <Check className="size-3 text-white stroke-[3px]" />}
-                                                </button>
                                             </div>
                                         </div>
-                                        <p className="text-[9px] font-bold text-slate-500 uppercase tracking-tight truncate mt-0.5">{poc.title}</p>
-                                    </div>
+                                    )}
                                 </div>
-
-                                {/* Comment Section (Collapsible) */}
-                                {activeCommentPoc === poc.id && (
-                                    <div className="bg-slate-50 p-3 border-t border-slate-100 space-y-3 animate-in slide-in-from-top-2 duration-200">
-                                        <div className="flex gap-2">
-                                            <Input
-                                                placeholder="Add comment..."
-                                                value={newComment}
-                                                onChange={(e) => setNewComment(e.target.value)}
-                                                className="h-7 rounded-lg text-[10px] bg-white border-slate-200"
-                                            />
-                                            <Button size="sm" onClick={() => handleAddComment(poc.id)} className="bg-blue-500 hover:bg-blue-600 text-white rounded-lg h-7 px-2">
-                                                <Plus className="size-3" />
-                                            </Button>
-                                        </div>
-
-                                        <div className="space-y-2 max-h-32 overflow-y-auto">
-                                            {comments[poc.id]?.map((comm) => (
-                                                <div key={comm.id} className="bg-white p-2 rounded-xl shadow-sm border border-slate-100">
-                                                    <div className="flex items-center justify-between mb-1">
-                                                        <span className="text-[8px] font-bold text-blue-600 uppercase">You</span>
-                                                        <span className="text-[8px] text-slate-400 font-bold uppercase">{new Date(comm.created_at).toLocaleDateString()}</span>
-                                                    </div>
-                                                    <p className="text-[10px] font-medium text-slate-600">{comm.comment}</p>
-                                                </div>
-                                            ))}
-                                        </div>
-                                    </div>
-                                )}
-                            </div>
-                        ))}
+                            );
+                        })}
 
                         {(!company.pocs || company.pocs.length === 0) && (
                             <div className="py-8 text-center text-slate-400 space-y-2">
@@ -652,14 +1007,8 @@ export default function ProspectPage() {
                         )}
                     </div>
 
-                    <div className="p-4 bg-white border-t border-slate-200 shrink-0">
-                        <Button className="w-full h-10 bg-[#00A3FF] hover:bg-blue-600 rounded-xl text-white font-bold uppercase tracking-widest text-[10px] shadow-lg shadow-blue-500/10">
-                            Identify More Strategy
-                        </Button>
-                    </div>
                 </div>
             </div>
         </div>
     );
 }
-

@@ -1,12 +1,13 @@
 "use client";
 
 import * as React from "react";
+import Link from "next/link";
+import { usePathname } from "next/navigation";
 import {
-    Home,
-    Search,
-    ShieldCheck,
-    Briefcase,
+    LayoutDashboard,
     Target,
+    Building2,
+    Briefcase,
 } from "lucide-react";
 
 import {
@@ -25,18 +26,24 @@ import {
 const data = {
     navMain: [
         {
-            title: "Navigation",
+            title: "Prospecting",
             items: [
-                { name: "Home", href: "/", icon: Home },
-                { name: "Prospecting", href: "/prospecting", icon: Search },
-                { name: "Formal Customers", href: "/customers", icon: ShieldCheck },
-                { name: "Position List", href: "/positions", icon: Briefcase },
+                { name: "Dashboard", href: "/", icon: LayoutDashboard },
+                { name: "Prospecting Queue", href: "/prospecting", icon: Target },
+            ]
+        },
+        {
+            title: "Management",
+            items: [
+                { name: "Customers", href: "/customers", icon: Building2 },
+                { name: "Positions", href: "/positions", icon: Briefcase },
             ]
         },
     ],
 };
 
 export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
+    const pathname = usePathname();
     return (
         <Sidebar collapsible="icon" className="border-r border-slate-200" {...props}>
             <SidebarHeader className="h-16 border-b border-slate-200 flex items-center px-6">
@@ -57,18 +64,25 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
                             {group.title}
                         </SidebarGroupLabel>
                         <SidebarMenu className="gap-0.5">
-                            {group.items.map((item) => (
-                                <SidebarMenuItem key={item.name}>
-                                    <SidebarMenuButton
-                                        className="h-10 px-4 rounded-xl font-medium text-slate-600 hover:bg-slate-50 hover:text-slate-900 transition-all duration-200"
-                                    >
-                                        <a href={item.href} className="flex items-center gap-3 w-full">
-                                            <item.icon className="size-4 shrink-0" />
-                                            <span className="text-sm tracking-tight">{item.name}</span>
-                                        </a>
-                                    </SidebarMenuButton>
-                                </SidebarMenuItem>
-                            ))}
+                            {group.items.map((item) => {
+                                const isActive = pathname === item.href;
+                                return (
+                                    <SidebarMenuItem key={item.name}>
+                                        <SidebarMenuButton
+                                            className={`h-10 px-4 rounded-xl transition-all duration-200 ${
+                                                isActive
+                                                    ? "bg-blue-50 text-blue-600 font-semibold"
+                                                    : "font-medium text-slate-600 hover:bg-slate-50 hover:text-slate-900"
+                                            }`}
+                                        >
+                                            <Link href={item.href} className="flex items-center gap-3 w-full">
+                                                <item.icon className="size-4 shrink-0" />
+                                                <span className="text-sm tracking-tight">{item.name}</span>
+                                            </Link>
+                                        </SidebarMenuButton>
+                                    </SidebarMenuItem>
+                                );
+                            })}
                         </SidebarMenu>
                     </SidebarGroup>
                 ))}

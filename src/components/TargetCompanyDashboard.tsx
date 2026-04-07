@@ -1,17 +1,13 @@
 "use client";
 
 import React, { useState } from "react";
-import Papa from "papaparse";
+import { useRouter } from "next/navigation";
 import {
     CheckCircle2,
     XCircle,
     Search,
-    Building2,
-    ExternalLink,
     MapPin,
-    Globe,
     Linkedin,
-    Trash2,
     Loader2,
     User,
     Sparkles,
@@ -21,12 +17,10 @@ import {
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Progress } from "@/components/ui/progress";
-import POCViewer from "./POCViewer";
 
 export interface CompanyData {
     id: string;
@@ -51,20 +45,12 @@ export interface CompanyData {
     matchAnalysis?: string;
     rolesMatch?: Array<{ role: string; fitLevel: string; estSalary?: string }>;
     relevantCustomers?: string[];
-    pocs?: Array<{ id: string; name: string; title: string; linkedinUrl: string; isAccepted: boolean; profilePicUrl?: string }>;
+    pocs?: Array<{ id: string; name: string; title: string; department?: string; seniorityLevel?: string; linkedinUrl: string; isAccepted: boolean; profilePicUrl?: string }>;
     clickedPocIds?: string[];
+    lsgFitScore?: number;
+    lsgFitReasoning?: string;
+    outreachAngle?: string;
 }
-
-const TARGET_INDUSTRIES = [
-    "logistics",
-    "transportation",
-    "trucking",
-    "supply chain",
-    "retail/wholesale",
-    "furniture",
-    "food & beverages",
-    "food manufacturing",
-];
 
 export const checkIsTarget = (country: string, industry: string) => {
     const cLower = country?.trim().toLowerCase() || "";
@@ -74,6 +60,8 @@ export const checkIsTarget = (country: string, industry: string) => {
         cLower === "usa" ||
         cLower.includes("us (") || // handle cases like "US (New York)" if they exist
         cLower === "united statess"; // Handle the typo caught in the CSV sample
+
+    const isCanada = cLower.includes("canada") || cLower === "ca";
 
     const indLower = industry?.trim().toLowerCase() || "";
     // Target industries from the requirement
@@ -90,7 +78,7 @@ export const checkIsTarget = (country: string, industry: string) => {
 
     const matchesIndustry = targetKeywords.some((target) => indLower.includes(target));
 
-    return isUS && matchesIndustry;
+    return (isUS || isCanada) && matchesIndustry;
 };
 
 interface DashboardProps {
@@ -100,12 +88,17 @@ interface DashboardProps {
     isPaused: boolean;
     onTogglePause: () => void;
     onUpdateCompany: (company: CompanyData) => void;
+    onSmartLookup?: (value: string) => void;
+    onUploadClick?: () => void;
+    isLookupLoading?: boolean;
 }
 
-export default function TargetCompanyDashboard({ companies, enrichingIds, onEnrich, isPaused, onTogglePause, onUpdateCompany }: DashboardProps) {
+export default function TargetCompanyDashboard({ companies, enrichingIds, onEnrich, isPaused, onTogglePause, onUpdateCompany, onSmartLookup, onUploadClick, isLookupLoading }: DashboardProps) {
+    const router = useRouter();
     const [searchTerm, setSearchTerm] = useState("");
     const [statusFilter, setStatusFilter] = useState<string>("all");
     const [industryFilter, setIndustryFilter] = useState<string>("all");
+    const [emptyLookupValue, setEmptyLookupValue] = useState("");
 
     // Extract unique industries for filter
     const uniqueIndustries = Array.from(new Set(companies.map(c => c.verifiedIndustry || c.industry || "Unknown"))).filter(Boolean).sort();
@@ -146,6 +139,30 @@ export default function TargetCompanyDashboard({ companies, enrichingIds, onEnri
             <Badge variant="secondary" className="bg-slate-100 text-slate-500 border-slate-200 px-3 py-1 opacity-60">
                 <XCircle className="w-3.5 h-3.5 mr-1.5" />
                 Not Target
+            </Badge>
+        );
+    };
+
+    const getFitScoreBadge = (company: CompanyData) => {
+        if (company.lsgFitScore == null) return <span className="text-slate-300 text-[10px] italic font-medium">--</span>;
+        const score = company.lsgFitScore;
+        if (score >= 8) {
+            return (
+                <Badge className="bg-emerald-50 text-emerald-700 border-emerald-200 px-2 py-0.5 text-[10px] font-bold shadow-sm">
+                    {score}/10 High
+                </Badge>
+            );
+        }
+        if (score >= 5) {
+            return (
+                <Badge className="bg-amber-50 text-amber-700 border-amber-200 px-2 py-0.5 text-[10px] font-bold shadow-sm">
+                    {score}/10 Med
+                </Badge>
+            );
+        }
+        return (
+            <Badge className="bg-red-50 text-red-600 border-red-200 px-2 py-0.5 text-[10px] font-bold shadow-sm">
+                {score}/10 Low
             </Badge>
         );
     };
@@ -256,6 +273,7 @@ export default function TargetCompanyDashboard({ companies, enrichingIds, onEnri
                                         <TableHead className="py-4 font-bold text-[11px] uppercase tracking-widest text-slate-500">LinkedIn</TableHead>
                                         <TableHead className="py-4 font-bold text-[11px] uppercase tracking-widest text-slate-500">Location</TableHead>
                                         <TableHead className="py-4 font-bold text-[11px] uppercase tracking-widest text-slate-500">Industry</TableHead>
+                                        <TableHead className="py-4 font-bold text-[11px] uppercase tracking-widest text-slate-500">Fit Score</TableHead>
                                         <TableHead className="py-4 font-bold text-[11px] uppercase tracking-widest text-slate-500">Status</TableHead>
                                         <TableHead className="text-right pr-6 py-4 font-bold text-[11px] uppercase tracking-widest text-slate-500">Action</TableHead>
                                     </TableRow>
@@ -271,7 +289,7 @@ export default function TargetCompanyDashboard({ companies, enrichingIds, onEnri
                                             <TableRow
                                                 key={company.id}
                                                 className="group hover:bg-slate-50 transition-colors border-b border-slate-50 last:border-0 cursor-pointer"
-                                                onClick={() => window.location.href = `/prospect/${company.id}`}
+                                                onClick={() => router.push(`/prospect/${company.id}`)}
                                             >
                                                 <TableCell className="pl-6 py-4">
                                                     <div className="flex flex-col">
@@ -281,19 +299,18 @@ export default function TargetCompanyDashboard({ companies, enrichingIds, onEnri
                                                                 <Loader2 className="w-3 h-3 text-[#00A3FF] animate-spin" />
                                                             )}
                                                             {hasPocs && (
-                                                                <div className="flex items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
-                                                                    {clickedCount > 0 && (
-                                                                        <div className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-tight border bg-emerald-50 text-emerald-600 border-emerald-100 shadow-sm shadow-emerald-500/5">
-                                                                            <User className="w-2.5 h-2.5" />
-                                                                            {clickedCount}
-                                                                        </div>
-                                                                    )}
-                                                                    {((company.pocs?.length || 0) - clickedCount) > 0 && (
-                                                                        <div className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-tight border bg-slate-50 text-slate-400 border-slate-100 italic">
-                                                                            <User className="w-2.5 h-2.5" />
-                                                                            {(company.pocs?.length || 0) - clickedCount}
-                                                                        </div>
-                                                                    )}
+                                                                <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+                                                                    <div className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold tracking-tight border shadow-sm ${
+                                                                        clickedCount > 0
+                                                                            ? 'bg-emerald-50 text-emerald-600 border-emerald-100 shadow-emerald-500/5'
+                                                                            : 'bg-slate-50 text-slate-400 border-slate-100'
+                                                                    }`}>
+                                                                        <User className="w-2.5 h-2.5" />
+                                                                        <span>{company.pocs?.length} {(company.pocs?.length || 0) === 1 ? 'contact' : 'contacts'}</span>
+                                                                        {clickedCount > 0 && (
+                                                                            <span className="text-emerald-500">({clickedCount} reviewed)</span>
+                                                                        )}
+                                                                    </div>
                                                                 </div>
                                                             )}
                                                         </div>
@@ -339,6 +356,9 @@ export default function TargetCompanyDashboard({ companies, enrichingIds, onEnri
                                                     </div>
                                                 </TableCell>
                                                 <TableCell className="py-4">
+                                                    {getFitScoreBadge(company)}
+                                                </TableCell>
+                                                <TableCell className="py-4">
                                                     {getStatusBadge(company)}
                                                 </TableCell>
                                                 <TableCell className="text-right pr-6 py-4">
@@ -346,7 +366,7 @@ export default function TargetCompanyDashboard({ companies, enrichingIds, onEnri
                                                         <Button
                                                             variant="default"
                                                             size="sm"
-                                                            onClick={() => window.location.href = `/prospect/${company.id}`}
+                                                            onClick={() => router.push(`/prospect/${company.id}`)}
                                                             className="h-9 px-4 bg-[#00A3FF] hover:bg-blue-600 text-white rounded-xl font-bold uppercase text-[11px] tracking-widest shadow-sm shadow-blue-500/10 transition-all"
                                                         >
                                                             Prospect
@@ -362,12 +382,62 @@ export default function TargetCompanyDashboard({ companies, enrichingIds, onEnri
                     </div>
                 </div>
             ) : (
-                <div className="min-h-[400px] flex flex-col items-center justify-center text-center p-12 bg-slate-50/50 border-2 border-dashed border-slate-200 rounded-3xl">
-                    <div className="w-20 h-20 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center mb-6 shadow-inner">
-                        <FileUp className="w-10 h-10" />
+                <div className="min-h-[400px] flex flex-col items-center justify-center text-center p-12 bg-white border border-slate-200 rounded-3xl shadow-sm">
+                    <h2 className="text-2xl font-bold text-slate-900 mb-2">Start Prospecting</h2>
+                    <p className="text-slate-500 max-w-md mb-10 font-medium">
+                        Look up a single company instantly, or upload your HubSpot list for bulk intelligence.
+                    </p>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6 w-full max-w-2xl">
+                        {/* Option 1: Smart Lookup */}
+                        <div className="flex flex-col items-center gap-4 p-8 bg-gradient-to-b from-blue-50/80 to-white border border-blue-100 rounded-2xl">
+                            <div className="w-14 h-14 bg-blue-100 text-[#00A3FF] rounded-2xl flex items-center justify-center">
+                                <Search className="w-7 h-7" />
+                            </div>
+                            <div>
+                                <h3 className="text-sm font-bold text-slate-900 mb-1">Look Up a Company</h3>
+                                <p className="text-xs text-slate-500 mb-4">Enter a name, website, or LinkedIn URL</p>
+                            </div>
+                            <div className="w-full flex gap-2">
+                                <Input
+                                    placeholder="e.g. JB Hunt, ryder.com..."
+                                    value={emptyLookupValue}
+                                    onChange={(e) => setEmptyLookupValue(e.target.value)}
+                                    onKeyDown={(e) => {
+                                        if (e.key === 'Enter' && onSmartLookup) onSmartLookup(emptyLookupValue);
+                                    }}
+                                    className="h-10 text-sm rounded-xl border-blue-200 bg-white focus-visible:ring-blue-200"
+                                />
+                                <Button
+                                    onClick={() => onSmartLookup?.(emptyLookupValue)}
+                                    disabled={!emptyLookupValue.trim() || isLookupLoading}
+                                    className="h-10 px-4 bg-[#00A3FF] hover:bg-blue-600 text-white rounded-xl font-bold text-xs whitespace-nowrap"
+                                >
+                                    {isLookupLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : "Analyze"}
+                                </Button>
+                            </div>
+                        </div>
+
+                        {/* Option 2: Upload */}
+                        <div
+                            className="flex flex-col items-center gap-4 p-8 bg-gradient-to-b from-slate-50/80 to-white border-2 border-dashed border-slate-200 rounded-2xl hover:border-blue-300 transition-colors cursor-pointer group"
+                            onClick={() => onUploadClick?.()}
+                        >
+                            <div className="w-14 h-14 bg-slate-100 text-slate-500 group-hover:bg-blue-100 group-hover:text-[#00A3FF] rounded-2xl flex items-center justify-center transition-colors">
+                                <FileUp className="w-7 h-7" />
+                            </div>
+                            <div>
+                                <h3 className="text-sm font-bold text-slate-900 mb-1">Upload HubSpot Export</h3>
+                                <p className="text-xs text-slate-500 mb-4">Bulk analyze your entire company list</p>
+                            </div>
+                            <Button
+                                variant="outline"
+                                className="h-10 px-6 rounded-xl font-bold text-xs border-slate-300 text-slate-600 hover:bg-blue-50 hover:text-[#00A3FF] hover:border-blue-200 transition-all"
+                            >
+                                Choose CSV File
+                            </Button>
+                        </div>
                     </div>
-                    <h2 className="text-2xl font-bold text-slate-900 mb-2">Ready to Prospect?</h2>
-                    <p className="text-slate-500 max-w-sm mb-8 font-medium">Upload your HubSpot export in the header to identify high-value targets in real-time.</p>
                 </div>
             )}
         </div>
